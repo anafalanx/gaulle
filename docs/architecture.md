@@ -31,7 +31,7 @@ Decided.
 5. **Linear by default, concurrency explicit.** A command returns when it
    has its result or reaches its deadline, unless the program asked
    otherwise.
-6. **Everything started is owned.** Processes, jobs and handles end with
+6. **Everything started is owned.** Processes, tasks and handles end with
    their owner. Ownership is not isolation: programs are trusted code and
    run with the user's rights.
 7. **Errors are contract.** A failure Gaulle defines carries
@@ -50,7 +50,7 @@ Decided.
 | Layer | Holds | Written in | Changes |
 |---|---|---|---|
 | Host | `main`, the entry check, the start of Tcl and Tk, the commands that reach the engine, SQLite, Windows interfaces that need C, and the bridge that queues an event for the Tcl thread | C | rarely |
-| Engine | jobs (tokens, deadlines, cancelling), the scheduler for parallel work, the pool's plumbing, the HTTPS server, the rest of the palette's native work | Go | rarely |
+| Engine | tasks (tickets, deadlines, cancelling), the scheduler for parallel work, the pool's plumbing, the HTTPS server, the rest of the palette's native work | Go | rarely |
 | Prelude | the Tcl side of the palette, package `gaulle N` | Tcl | rarely |
 | Program | an opted-in entry, its Tcl and its assets | Tcl | always |
 
@@ -73,7 +73,7 @@ Decided.
  |  host (C): Tcl and Tk, SQLite, the event bridge                  |
  |                                                                  |
  |  Tcl thread                 commands -->   engine (Go threads)   |
- |  program, prelude, Tk       <-- events     jobs, scheduler       |
+ |  program, prelude, Tk       <-- events     tasks, scheduler      |
  +---------|-----------------------------------|-----------|--------+
            |                                   | pipes     | pipes
            |                          +--------+------+    |
@@ -98,21 +98,21 @@ Decided.
 
 ## Linear and evented
 
-Decided. The command names in the examples are placeholders.
+Decided.
 
 Linear is the default. Every command that can take long can also be run the
 evented way, and all of that goes through one mechanism in the engine, the
-job:
+task:
 
-1. The call returns a token at once.
+1. The call returns a ticket at once.
 2. The work runs on an engine thread, with a deadline if one was given.
 3. The result arrives as one Tcl event: `ok 1` and the result, or `ok 0`
    with the code and the message.
-4. Cancelling by the token stops the work at its next cancellation point. A
+4. Cancelling by the ticket stops the work at its next cancellation point. A
    result that arrives after that is dropped.
 
-A token has an owner and is closed or cancelled explicitly. A panic in a job
-is recovered at the job's entry and becomes a failed result.
+A ticket has an owner and is closed or cancelled explicitly. A panic in a
+task is recovered at the task's entry and becomes a failed result.
 
 One command starts any palette call, which is handed over as a list. No
 palette command has an evented twin of its own:
@@ -122,19 +122,19 @@ palette command has an evented twin of its own:
 set page [http get $url]
 
 # evented: one command starts any palette call
-set token [job start {http get $url} -then showPage]
-job cancel $token
+set ticket [task start {http get $url} -then showPage]
+task cancel $ticket
 ```
 
-The result can be taken in three ways, all thin layers over the same token:
+The result can be taken in three ways, all thin layers over the same ticket:
 
 ```tcl
 # a callback, through the event loop
-job start {http get $url} -then showPage
+task start {http get $url} -then showPage
 
 # a blocking wait, for tools without a window
-set token [job start {http get $url}]
-set page [job wait $token]
+set ticket [task start {http get $url}]
+set page [task wait $ticket]
 
 # await, inside a coroutine: this line pauses, the event loop goes on,
 # and a failure is an ordinary Tcl error
@@ -143,7 +143,7 @@ set page [await {http get $url}]
 
 ## Parallel work
 
-Decided. The command names in the example are placeholders.
+Decided.
 
 The program's Tcl says what to run. The engine's scheduler fans it out,
 bounds it, cancels it, and returns the results in the order of the items.
@@ -151,17 +151,17 @@ One command does this for both kinds of work:
 
 ```tcl
 # palette calls on goroutines, 16 at a time
-set prints [job map {hash file sha256} $files -width 16]
+set prints [task map {hash file sha256} $files -width 16]
 
 # the program's own operations, in worker processes
-set months [job map {rebuild month} $ranges -pool $pool]
+set months [task map {rebuild month} $ranges -pool $pool]
 ```
 
 There are two executors:
 
 | | Runs | Where | For |
 |---|---|---|---|
-| Engine jobs | Go or C code that is part of the runtime | goroutines, inside the process | palette calls: HTTP, hashing, files, SQL, codecs |
+| Engine tasks | Go or C code that is part of the runtime | goroutines, inside the process | palette calls: HTTP, hashing, files, SQL, codecs |
 | Worker operations | the program's Tcl | worker processes | the program's own logic |
 
 Whether an item runs on a goroutine or in a worker depends only on whether
@@ -188,6 +188,33 @@ The pool of worker processes:
   command line can still be a worker, such as a script in another language
   that speaks the worker protocol.
 
+```tcl
+# ops.tcl, loaded by every worker
+operation rebuild {month} {
+    # ordinary Tcl: read the month from the store, work it out
+    return $result
+}
+
+# the director
+set pool   [pool create -width 12 -operations ops.tcl]
+set months [task map {rebuild month} $ranges -pool $pool]
+pool close $pool
+```
+
+## Vocabulary
+
+Decided.
+
+| Word | Meaning |
+|---|---|
+| `task` | the command for evented work: `task start`, `task wait`, `task cancel`, `task info`, `task map` |
+| ticket | what `task start` returns at once; it is waited for, looked at or cancelled |
+| `-then` | the option that names the script to call when the result is there |
+| `await` | inside a coroutine: pause this line until the result is there |
+| `task map` | fan one call out over many items, results in the order of the items |
+| `pool` | the group of worker processes: `pool create`, `pool close` |
+| `operation` | in the file every worker loads: declares one thing a worker can be asked to do |
+
 ## The store
 
 Decided.
@@ -208,7 +235,7 @@ Decided.
   Evidence).
 - **The HTTPS client is Windows' own.** It follows the system's proxy and
   signs in with the Windows user's credentials by itself, which Go's client
-  does not. It runs through jobs like any long command. Go's client can be
+  does not. It runs through tasks like any long command. Go's client can be
   added later if a need shows.
 - **From Go's standard library, in the first version:** JSON and CSV;
   hashing and encryption; fast file walks, with hashing of many files at
@@ -293,7 +320,5 @@ module.
 
 ## Open
 
-1. The names of the commands. `job`, `await`, `map` and `pool` in the
-   examples are placeholders.
-2. The shape of each palette command: its arguments, results and bounds.
-3. Everything listed as not tried under Evidence.
+1. The shape of each palette command: its arguments, results and bounds.
+2. Everything listed as not tried under Evidence.
