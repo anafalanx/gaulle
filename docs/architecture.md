@@ -245,8 +245,26 @@ Decided.
   templates, pattern matching and time zones. Tcl has its own for most of
   these.
 
-## The reference built in
+## Wrap
 
+Decided. Untried.
+
+`wrap` turns a program into a standalone tool: from a folder of Tcl to a
+stamped, signed, self-checking executable, with no other tool needed.
+
+- **One host.** `wrap` copies the runtime's own program image and marks the
+  copy as console or GUI.
+- **The tool's own identity.** Name, version, icon and author are stamped
+  into the copy before the program is attached.
+- **An explicit file list is the only way in.** The tool checks its contents
+  against that list at every start and refuses to run when something is
+  missing or changed.
+- **Signing is part of wrap.** It happens after the program is attached,
+  with a certificate from the Windows store.
+- **A wrapped tool runs only its own program.** The runtime is a general
+  interpreter; a tool made from it is not.
+
+## The reference built in
 Decided.
 
 The runtime carries its own reference and the whole Tcl/Tk manual of its
