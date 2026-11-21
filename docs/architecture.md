@@ -245,6 +245,37 @@ Decided.
   templates, pattern matching and time zones. Tcl has its own for most of
   these.
 
+## Also in the first version
+
+Decided. None of it is tried.
+
+1. **Data straight into the store.** A command decodes JSON or CSV in the
+   engine and inserts the rows into SQLite without their becoming Tcl
+   values. The raw answer can be stored beside them.
+2. **A table for a million rows.** A grid tied to a query asks the store
+   only for the rows on screen. Sorting and filtering happen in SQL.
+3. **Where the time goes.** A freeze report says which Tcl procedure was
+   running when the event loop has not turned for a stated time. A sampling
+   profiler notes every few milliseconds where Tcl is.
+4. **Tests that stay off the screen.** A test runner that fails on leaked
+   timers, tasks and processes; every window of a test run on a hidden
+   desktop; a command that captures a window as a picture; and an HTTP layer
+   that records answers once and replays them.
+5. **A door for an AI agent.** A program's operations can be offered to an
+   outside agent as tools over a local connection: off by default, each run
+   in a worker under the pool's limits, with read-only questions to the
+   store. No AI is inside the runtime.
+6. **Sign-in and secrets.** A store for sign-in material that only the
+   Windows user can read, and a sign-in window that the runtime owns.
+7. **Spreadsheets in and out.** Reading and writing `.xlsx`, and copying a
+   table so that it pastes as a table.
+8. **SQLite built on purpose.** Text search, the interval index, JSON,
+   maths, backup and change sets are named parts of the build.
+9. **One running instance** of a program. A second start hands its
+   arguments to the first.
+10. **A diagnostics file** that a user can send to the program's maker.
+11. **Updating from a share**, with a check of the signature.
+
 ## Not in Gaulle
 
 Decided.
