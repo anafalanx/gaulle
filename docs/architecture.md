@@ -245,8 +245,24 @@ Decided.
   templates, pattern matching and time zones. Tcl has its own for most of
   these.
 
-## Also in the first version
+## The reference built in
 
+Decided.
+
+The runtime carries its own reference and the whole Tcl/Tk manual of its
+exact version, so that a person or an agent can look a command up without
+the internet.
+
+- **One form.** Each page is Markdown, with a stable name.
+- **One small database.** The pages sit in a SQLite database inside the
+  runtime, and a search is a query on its text search.
+- **One command**, `docs`, gets a page and searches.
+- **Also in it:** the page on SQLite's Tcl interface, and the list of what
+  Gaulle's SQLite has built in.
+- **Not in it:** Go's documentation, and the rest of SQLite's manual.
+- **A wrapped tool leaves the reference out** unless it asks for it.
+
+## Also in the first version
 Decided. None of it is tried.
 
 1. **Data straight into the store.** A command decodes JSON or CSV in the
