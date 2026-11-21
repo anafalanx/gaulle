@@ -12,8 +12,8 @@ Gaulle is a compact Windows runtime for Tcl/Tk programs: one executable that
 installs nothing. It holds a small host written in C, Tcl and Tk linked in
 statically, SQLite, and an engine written in Go. Programs are written in Tcl.
 The engine belongs to the runtime. It gives every program evented
-operations, parallel work, an HTTPS client and server and more of Go's
-standard library, and no program adds to it.
+operations, parallel work, an HTTPS server and more of Go's standard
+library, and no program adds to it.
 
 The runtime changes rarely. A program changes as often as it likes.
 
@@ -45,21 +45,23 @@ Decided.
 
 ## Layers
 
-Decided; the placement rule is proposed.
+Decided.
 
 | Layer | Holds | Written in | Changes |
 |---|---|---|---|
-| Host | `main`, the entry check, the start of Tcl and Tk, the commands that reach the engine, SQLite, and the bridge that queues an event for the Tcl thread | C | rarely |
-| Engine | jobs (tokens, deadlines, cancelling), the scheduler for parallel work, the pool's plumbing, HTTPS both ways, the rest of the palette's native work | Go | rarely |
+| Host | `main`, the entry check, the start of Tcl and Tk, the commands that reach the engine, SQLite, Windows interfaces that need C, and the bridge that queues an event for the Tcl thread | C | rarely |
+| Engine | jobs (tokens, deadlines, cancelling), the scheduler for parallel work, the pool's plumbing, the HTTPS server, the rest of the palette's native work | Go | rarely |
 | Prelude | the Tcl side of the palette, package `gaulle N` | Tcl | rarely |
 | Program | an opted-in entry, its Tcl and its assets | Tcl | always |
 
 The first three are the runtime. A change to any of them makes a new Gaulle
 number, a natural number. A program changes without one.
 
-Placement rule, proposed: a native facility is written in Go unless it has
-to be C. C is for the host, the Tcl C interface, SQLite, and Windows
-interfaces that are only practical from C.
+Placement rule: a native facility is written in Go unless it has to be C. C
+is for the host, the Tcl C interface, SQLite, Windows interfaces that are
+only practical from C, and commands so small and so often called that the
+crossing would dominate. One call from Tcl into Go and back cost 1.3
+microseconds in the trial.
 
 ## Processes and threads
 
@@ -96,30 +98,66 @@ Decided.
 
 ## Linear and evented
 
-The mechanism is decided. The vocabulary is open.
+Decided. The command names in the examples are placeholders.
 
-Linear is the default. Every command that can take long also has an evented
-form, and all evented forms go through one mechanism in the engine, the job:
+Linear is the default. Every command that can take long can also be run the
+evented way, and all of that goes through one mechanism in the engine, the
+job:
 
 1. The call returns a token at once.
 2. The work runs on an engine thread, with a deadline if one was given.
-3. The result arrives as one Tcl event. The script that was given is called
-   with a dictionary: `ok 1` and the result, or `ok 0` with the code and the
-   message.
+3. The result arrives as one Tcl event: `ok 1` and the result, or `ok 0`
+   with the code and the message.
 4. Cancelling by the token stops the work at its next cancellation point. A
    result that arrives after that is dropped.
 
 A token has an owner and is closed or cancelled explicitly. A panic in a job
 is recovered at the job's entry and becomes a failed result.
 
+One command starts any palette call, which is handed over as a list. No
+palette command has an evented twin of its own:
+
+```tcl
+# linear, the default
+set page [http get $url]
+
+# evented: one command starts any palette call
+set token [job start {http get $url} -then showPage]
+job cancel $token
+```
+
+The result can be taken in three ways, all thin layers over the same token:
+
+```tcl
+# a callback, through the event loop
+job start {http get $url} -then showPage
+
+# a blocking wait, for tools without a window
+set token [job start {http get $url}]
+set page [job wait $token]
+
+# await, inside a coroutine: this line pauses, the event loop goes on,
+# and a failure is an ordinary Tcl error
+set page [await {http get $url}]
+```
+
 ## Parallel work
 
-Decided in outline. Who takes the worker role is proposed. The vocabulary is
-open.
+Decided. The command names in the example are placeholders.
 
 The program's Tcl says what to run. The engine's scheduler fans it out,
-bounds it, cancels it, and returns the results in order. There are two
-executors:
+bounds it, cancels it, and returns the results in the order of the items.
+One command does this for both kinds of work:
+
+```tcl
+# palette calls on goroutines, 16 at a time
+set prints [job map {hash file sha256} $files -width 16]
+
+# the program's own operations, in worker processes
+set months [job map {rebuild month} $ranges -pool $pool]
+```
+
+There are two executors:
 
 | | Runs | Where | For |
 |---|---|---|---|
@@ -144,9 +182,11 @@ The pool of worker processes:
 - **Rows do not travel.** A request carries keys and ranges. A worker reads
   its own slice from the store, and a large result goes to the store or to a
   file.
-- **The host takes the worker role** (proposed). The runtime sees a reserved
-  argument before it starts Tcl, starts Tcl without Tk and without a window,
-  loads the file that holds the program's operations, and serves.
+- **The host takes the worker role.** The runtime sees a reserved argument
+  before it starts Tcl, starts Tcl without Tk and without a window, loads
+  the file that holds the program's operations, and serves. Any other
+  command line can still be a worker, such as a script in another language
+  that speaks the worker protocol.
 
 ## The store
 
@@ -159,19 +199,24 @@ the workers read, each worker opening the same file itself.
 
 ## Network and standard library
 
-The HTTPS server is decided, from the first version. The rest of the
-selection is open.
+Decided.
 
-- **HTTPS both ways** comes from Go's standard library: a client, and a
-  server that hands each request to Tcl as an event and takes Tcl's answer
-  now or later.
-- **The client is bounded.** Go's HTTP client opens a connection for every
-  request that finds no room; unbounded, a burst overruns the 200 waiting
-  connections Windows gives a Go listener (see Evidence).
-- **Open:** whether the client that talks through a company's proxy with
-  Windows sign-in is Go's or Windows' own.
-- **Open:** which further parts of Go's standard library become palette
-  commands.
+- **The HTTPS server** comes from Go's standard library, from the first
+  version. It hands each request to Tcl as an event and takes Tcl's answer
+  now or later. Whoever calls it bounds its connections and tries again
+  after a refusal: Windows gives a Go listener 200 waiting connections (see
+  Evidence).
+- **The HTTPS client is Windows' own.** It follows the system's proxy and
+  signs in with the Windows user's credentials by itself, which Go's client
+  does not. It runs through jobs like any long command. Go's client can be
+  added later if a need shows.
+- **From Go's standard library, in the first version:** JSON and CSV;
+  hashing and encryption; fast file walks, with hashing of many files at
+  once; encrypted connections for protocols other than HTTP, and name
+  lookups; and gauges of the engine itself.
+- **Left out for now:** compression and archives, images, and Go's
+  templates, pattern matching and time zones. Tcl has its own for most of
+  these.
 
 ## Not in Gaulle
 
@@ -248,8 +293,7 @@ module.
 
 ## Open
 
-1. The vocabulary of the evented form and of parallel work.
-2. Whether the host or the program takes the worker role.
-3. The placement rule for native work, Go or C.
-4. The HTTP client behind a company's proxy.
-5. Which parts of Go's standard library become palette commands.
+1. The names of the commands. `job`, `await`, `map` and `pool` in the
+   examples are placeholders.
+2. The shape of each palette command: its arguments, results and bounds.
+3. Everything listed as not tried under Evidence.
